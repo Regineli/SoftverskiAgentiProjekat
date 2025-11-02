@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package messages;
+
+option go_package = "federated-music-recommender/internal/messages;messages";
+
+// Poruka koju klijent šalje serveru (lokalnom ili centralnom)
+message ModelUpdate {
+  int32 client_id = 1;
+  repeated double weights = 2;
+}
+
+// Poruka koju server vraća klijentu
+message GlobalModel {
+  repeated double weights = 1;
+}
+
+// Poruka za lokalnu komunikaciju između aktora (menu <-> input)
+message MenuCommand {
+  string cmd = 1;
+}
