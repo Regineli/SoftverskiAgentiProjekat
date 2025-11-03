@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sort"
 )
 
 type Song struct {
@@ -55,6 +56,8 @@ func LoadDataset(path string) ([]Song, []string, error) {
 	for g := range genreMap {
 		genres = append(genres, g)
 	}
+
+	sort.Strings(genres)
 
 	fmt.Printf("✅ Učitano %d pesama, %d žanrova.\n", len(songs), len(genres))
 	return songs, genres, nil

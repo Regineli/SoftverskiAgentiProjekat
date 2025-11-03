@@ -11,44 +11,64 @@ import (
 	"federated-music-recommender/internal/model"
 )
 
-func RecommendSongs(m *model.MusicModel) {
-	songs := []struct {
-		name   string
-		vector []float64
-	}{
-		{"Thunderstruck", []float64{1, 0, 0}},
-		{"Bohemian Rhapsody", []float64{0.9, 0.1, 0}},
-		{"Shape of You", []float64{0.1, 1, 0}},
-		{"Uptown Funk", []float64{0.2, 0.8, 0}},
-		{"Take Five", []float64{0, 0, 1}},
-		{"Fly Me to the Moon", []float64{0, 0.1, 0.9}},
-	}
-
+// RecommendSongsLocal bira pesme iz dataset-a koje odgovaraju lokalnom modelu
+func RecommendSongsLocal(m *model.MusicModel, allSongs []Song, genres []string) []Song {
 	type scoredSong struct {
-		name   string
-		vector []float64
-		score  float64
+		Song
+		Score float64
 	}
 
-	results := []scoredSong{}
-	for _, s := range songs {
-		score := 0.0
-		for j := range s.vector {
-			score += s.vector[j] * m.Weights[j]
+	var scored []scoredSong
+
+	// Mapiranje žanra na indeks
+	genreIndex := make(map[string]int)
+	for i, g := range genres {
+		genreIndex[g] = i
+	}
+
+	// Izračunavanje score-a za svaku pesmu
+	for _, s := range allSongs {
+		if idx, ok := genreIndex[s.Genre]; ok && idx < len(m.Weights) {
+			score := m.Weights[idx] * float64(s.PlayCount)
+			scored = append(scored, scoredSong{Song: s, Score: score})
 		}
-		results = append(results, scoredSong{s.name, s.vector, score})
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].score > results[j].score
+	// Sortiraj po score-u
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].Score > scored[j].Score
 	})
 
-	fmt.Println("\n🎵 Preporučene pesme:")
-	for i, s := range results {
-		fmt.Printf("%d. %-20s (score: %.2f)\n", i+1, s.name, s.score)
+	// Vrati top 10
+	top := []Song{}
+	for i := 0; i < len(scored) && i < 10; i++ {
+		top = append(top, scored[i].Song)
 	}
 
-	fmt.Print("👉 Unesi broj pesme (1–6) ili Enter za povratak: ")
+	return top
+}
+
+// RecommendSongs prikazuje personalizovane preporuke na osnovu CSV dataset-a
+func RecommendSongs(m *model.MusicModel, genres []string) {
+	songs, _, err := LoadDataset("data/songs.csv")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	recommended := RecommendSongsLocal(m, songs, genres)
+	if len(recommended) == 0 {
+		fmt.Println("⚠️ Nema dostupnih pesama za preporuku.")
+		return
+	}
+
+	fmt.Println("\n🎵 Personalizovane preporuke:")
+	for i, s := range recommended {
+		fmt.Printf("%2d. %-25s | %-15s | %-10s | %d slušanja\n",
+			i+1, s.Name, s.Artist, s.Genre, s.PlayCount)
+	}
+
+	fmt.Print("👉 Unesi broj pesme (1–10) ili Enter za povratak: ")
 	reader := bufio.NewScanner(os.Stdin)
 	reader.Scan()
 	input := strings.TrimSpace(reader.Text())
@@ -57,52 +77,44 @@ func RecommendSongs(m *model.MusicModel) {
 	}
 
 	index, err := strconv.Atoi(input)
-	if err != nil || index < 1 || index > len(results) {
+	if err != nil || index < 1 || index > len(recommended) {
 		fmt.Println("⚠️ Nevažeći izbor.")
 		return
 	}
 
-	selected := results[index-1]
-	fmt.Printf("🎧 Slušaš pesmu: %s\n", selected.name)
-	m.TrainOnUserData(detectGenre(selected.vector))
-	fmt.Println("📈 Model ažuriran.")
-}
+	selected := recommended[index-1]
+	fmt.Printf("🎧 Slušaš pesmu: %s — %s (%s)\n", selected.Name, selected.Artist, selected.Genre)
 
-func detectGenre(v []float64) int {
-	maxI := 0
-	maxV := v[0]
-	for i, val := range v {
-		if val > maxV {
-			maxI = i
-			maxV = val
+	// pronađi indeks žanra i ažuriraj lokalni model
+	for i, g := range genres {
+		if g == selected.Genre {
+			m.TrainOnUserData(i)
+			fmt.Printf("📈 Model ažuriran za žanr: %s\n", g)
+			break
 		}
 	}
-	return maxI + 1
 }
 
-func SelectGenre(m *model.MusicModel) {
-	fmt.Println(`
-🎧 Izaberi žanr:
-1 -> Rock
-2 -> Pop
-3 -> Jazz
-`)
+// SelectGenre omogućava ručni odabir žanra od strane korisnika
+func SelectGenre(m *model.MusicModel, genres []string) {
+	fmt.Println("\n🎧 Izaberi žanr:")
+
+	for i, g := range genres {
+		fmt.Printf("%d -> %s\n", i+1, g)
+	}
+
 	reader := bufio.NewScanner(os.Stdin)
 	fmt.Print("👉 Unesi broj: ")
 	reader.Scan()
 	input := strings.TrimSpace(reader.Text())
 
-	switch input {
-	case "1":
-		m.TrainOnUserData(1)
-		fmt.Println("🎸 Slušao si Rock — model ažuriran.")
-	case "2":
-		m.TrainOnUserData(2)
-		fmt.Println("🎤 Slušao si Pop — model ažuriran.")
-	case "3":
-		m.TrainOnUserData(3)
-		fmt.Println("🎷 Slušao si Jazz — model ažuriran.")
-	default:
-		fmt.Println("⚠️ Nepoznat izbor.")
+	index, err := strconv.Atoi(input)
+	if err != nil || index < 1 || index > len(genres) {
+		fmt.Println("⚠️ Nevažeći izbor.")
+		return
 	}
+
+	selectedGenre := genres[index-1]
+	m.TrainOnUserData(index - 1)
+	fmt.Printf("🎧 Slušao si %s — lokalni model ažuriran.\n", selectedGenre)
 }

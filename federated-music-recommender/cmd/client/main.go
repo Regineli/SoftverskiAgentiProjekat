@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"federated-music-recommender/internal/client"
@@ -13,20 +14,32 @@ import (
 )
 
 type UserActor struct {
-	behavior actor.Behavior
-	model    *model.MusicModel
-	reader   *bufio.Scanner
+    behavior actor.Behavior
+    model    *model.MusicModel
+    reader   *bufio.Scanner
+    genres   []string // <── dodaj ovo
+    userID   int
 }
 
-func NewUserActor() actor.Actor {
+func NewUserActor(userID int) actor.Actor {
+	songs, genres, err := client.LoadDataset("data/songs.csv")
+	if err != nil {
+		fmt.Println("⚠️  Greška pri učitavanju dataset-a:", err)
+	}
+
 	act := &UserActor{
-		model:    model.NewModel(3),
+		model:    model.NewModel(len(genres)),
 		reader:   bufio.NewScanner(os.Stdin),
 		behavior: actor.NewBehavior(),
+		userID:   userID,
+		genres:   genres, // <── čuvamo redosled
 	}
+
+	fmt.Printf("📊 Učitano %d pesama i %d žanrova.\n", len(songs), len(genres))
 	act.behavior.Become(act.Menu)
 	return act
 }
+
 
 func (a *UserActor) Receive(ctx actor.Context) {
 	a.behavior.Receive(ctx)
@@ -37,7 +50,7 @@ func (a *UserActor) Menu(ctx actor.Context) {
 	switch msg := ctx.Message().(type) {
 
 	case *actor.Started:
-		fmt.Println("🚀 Klijent pokrenut.")
+		fmt.Printf("🚀 Klijent #%d pokrenut.\n", a.userID)
 		a.showMenu()
 		a.readInput(ctx)
 
@@ -51,8 +64,8 @@ func (a *UserActor) Menu(ctx actor.Context) {
 			ctx.Send(ctx.Self(), "genre")
 		case "3":
 			fmt.Println("📤 Slanje lokalnog modela serveru...")
-			client.EvaluateAndPrint(a.model, "Evaluacija pre slanja")
-			client.SendModelToServer(1, a.model) // pošalji model
+			client.EvaluateAndPrint(a.model, fmt.Sprintf("Evaluacija pre slanja (Korisnik #%d)", a.userID))
+			client.SendModelToServer(a.userID, a.model)
 			a.backToMenu(ctx)
 		case "4":
 			fmt.Println("⬇️ Preuzimanje globalnog modela sa servera...")
@@ -75,7 +88,7 @@ func (a *UserActor) ChoosingSong(ctx actor.Context) {
 	switch msg := ctx.Message().(type) {
 	case string:
 		if msg == "choose" {
-			client.RecommendSongs(a.model)
+			client.RecommendSongs(a.model, a.genres)
 			a.backToMenu(ctx)
 		}
 	}
@@ -86,7 +99,7 @@ func (a *UserActor) SelectingGenre(ctx actor.Context) {
 	switch msg := ctx.Message().(type) {
 	case string:
 		if msg == "genre" {
-			client.SelectGenre(a.model)
+			client.SelectGenre(a.model, a.genres)
 			a.backToMenu(ctx)
 		}
 	}
@@ -94,15 +107,39 @@ func (a *UserActor) SelectingGenre(ctx actor.Context) {
 
 // === HELPER FUNKCIJE ===
 func (a *UserActor) showMenu() {
+	fmt.Println("\n==============================")
+	fmt.Printf("👤 Korisnik #%d | 🎧 Model Weights po žanrovima:\n", a.userID)
+
+	// Koristi žanrove koji su učitani u strukturi UserActor
+	if len(a.genres) == 0 {
+		fmt.Println("⚠️ Nema učitanih žanrova za korisnika.")
+	} else {
+		// Ispis imena žanrova u jednom redu
+		for _, g := range a.genres {
+			fmt.Printf("%-12s ", g)
+		}
+		fmt.Println()
+
+		// Ispis težina u istom redosledu
+		for _, w := range a.model.Weights {
+			fmt.Printf("%-12.2f ", w)
+		}
+		fmt.Println()
+	}
+
+	fmt.Println("==============================")
+
 	fmt.Println(`
 === 🎵 Meni ===
 1 -> Pogledaj preporučene pesme
 2 -> Izaberi žanr koji želiš da slušaš
-3 -> Pošalji model serveru (simulacija)
-4 -> Preuzmi globalni model (simulacija)
+3 -> Pošalji model serveru
+4 -> Preuzmi globalni model
 exit -> Zatvori klijenta
 `)
 }
+
+
 
 func (a *UserActor) readInput(ctx actor.Context) {
 	fmt.Print("👉 Izbor: ")
@@ -119,9 +156,24 @@ func (a *UserActor) backToMenu(ctx actor.Context) {
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("⚠️  Koristi: go run ./cmd/client <userID>")
+		return
+	}
+
+	userID, err := strconv.Atoi(os.Args[1])
+	if err != nil {
+		fmt.Println("⚠️  Nevažeći userID:", os.Args[1])
+		return
+	}
+
 	system := actor.NewActorSystem()
 	root := system.Root
-	props := actor.PropsFromProducer(NewUserActor)
+
+	props := actor.PropsFromProducer(func() actor.Actor {
+		return NewUserActor(userID)
+	})
+
 	root.Spawn(props)
 	select {}
 }

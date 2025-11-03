@@ -1,40 +1,28 @@
 package model
 
-import "math/rand"
+import (
+    "fmt"
+)
 
+// MusicModel represents a simple model with genre preference weights.
 type MusicModel struct {
-	Weights map[string]float64
+	Weights []float64 // e.g. [Rock, Pop, Jazz]
 }
 
-func NewModel(genres []string) *MusicModel {
-	weights := make(map[string]float64)
-	for _, g := range genres {
-		weights[g] = rand.Float64() * 0.5 // inicijalno random vrednosti
+// NewModel initializes a model with random or zeroed weights.
+func NewModel(numGenres int) *MusicModel {
+	m := &MusicModel{Weights: make([]float64, numGenres)}
+	for i := 0; i < numGenres; i++ {
+		m.Weights[i] = 0.5 // neutral starting point
 	}
-	return &MusicModel{Weights: weights}
+	return m
 }
 
-func (m *MusicModel) TrainOnGenre(genre string) {
-	if _, exists := m.Weights[genre]; exists {
-		m.Weights[genre] += 0.1 // svaka nova pesma jača preferencu
+// Print displays the model weights nicely.
+func (m *MusicModel) Print() {
+	fmt.Printf("🎧 Model Weights: ")
+	for _, w := range m.Weights {
+		fmt.Printf("%.2f ", w)
 	}
-}
-
-func (m *MusicModel) GetPreferredGenres() []string {
-	type kv struct {
-		Key   string
-		Value float64
-	}
-	var sorted []kv
-	for k, v := range m.Weights {
-		sorted = append(sorted, kv{k, v})
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Value > sorted[j].Value
-	})
-	var result []string
-	for _, kv := range sorted {
-		result = append(result, kv.Key)
-	}
-	return result
+	fmt.Println()
 }
